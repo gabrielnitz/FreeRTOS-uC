@@ -1,0 +1,193 @@
+
+#define F_CPU 16000000UL // Define a frequência do microcontrolador 16MHz
+#include <avr/io.h>	// Definições de componente
+#include "FreeRTOS.h" // Biblioteca do FreeRTOS
+#include "task.h" // Biblioteca para utilizar tarefas
+#include "timers.h" // Biblioteca para utilizar timers
+#include "event_groups.h" // Biblioteca para utilizar grupos de eventos
+
+// Definições de macros
+#define set_bit(Y,bit_x)(Y|=(1<<bit_x)) // Coloca 1 no bit x da variável Y
+#define clr_bit(Y,bit_x)(Y&=~(1<<bit_x)) // Coloca 0 no bit x da variável Y
+#define tst_bit(Y,bit_x)(Y&(1<<bit_x)) // Testa o bit_x na variável Y (retorna 0 ou 1)
+#define cpl_bit(Y,bit_x) (Y^=(1<<bit_x)) // Troca o valor do bit
+
+// Definição dos nomes dos pinos
+#define ventilador PB0
+#define lampada_calor PB1
+#define botao PD2
+#define buzina_porta PD3
+#define led_habilita_buzina PD5
+#define led_sinal PD7
+
+// Variáveis
+unsigned short int leitura;
+unsigned short int temperatura;
+int controle_botao = 0;
+
+// Identificador das tarefas
+TaskHandle_t HandleFrio;
+TaskHandle_t HandleCalor;
+TaskHandle_t HandleAbrirPorta;
+
+// Identificador do timer
+static TimerHandle_t auto_reload_timer = NULL;
+
+// Identificador do grupo de eventos
+EventGroupHandle_t evento; 
+
+// Bits dos eventos
+// São dois evento, um é a temperatura correta e outro é um botão pressionado
+const uint8_t ev_botao = (1 << 0); // 0b00000001
+const uint8_t ev_temperatura = (1 << 1); // 0b00000010
+
+// Protótipos das funções das tarefas
+void  taskCalor (void *p);
+void  taskFrio (void *p);
+void  taskAbrirPorta (void *p);
+
+// Protótipo da função de callback do timer
+void TimerCallback(TimerHandle_t xTimer);
+
+int main(void)
+{
+	// Configuração do ADC (potenciômetro que simula a variação de temperatura)
+	DIDR0 = 0x20;  // Desabilita entrada digital do ADC5 (PC5)
+	ADMUX = 0x45;  // Configura ADC5
+	ADCSRA = 0xE7; // Conversão contínua
+	ADCSRB = 0x00; // Conversão contínua
+	
+	// Configurações
+	DDRB = 0b00000011; // Configura PB0, e PB1 como saída
+	DDRD = 0b10101000; // Configura PD2 como entrada e PD3, PD5 e PD7 como saída
+	PORTB = 0b00000000; // Os LEDs começam apagados
+	PORTD = 0b00000100; // Habilita o pull-up para o botão
+	
+	// Criação de timer auto-reload
+	auto_reload_timer = xTimerCreate(	"Auto-reload timer",		// Nome do timer
+										1000 / portTICK_PERIOD_MS,	// Temperatura verificada a cada 1 s
+										pdTRUE,                     // É auto-reload
+										(void *)1,                  // Timer ID
+										TimerCallback);				// Função de callback
+	
+	
+	// Criação das tarefas
+	xTaskCreate(taskFrio, "Frio", 128, NULL, 1, &HandleFrio);
+	xTaskCreate(taskCalor, "Calor", 128, NULL, 1, &HandleCalor);
+	xTaskCreate(taskAbrirPorta, "Abrir Porta", 128, NULL, 1, &HandleAbrirPorta);
+	
+	// Criação do grupo de eventos
+	evento = xEventGroupCreate();
+	
+	// As tarefas taskFrio e taskCalor começam suspensas, é a função de callback do timer que vai começar lendo a temperatura para definir se está frio ou calor
+	vTaskSuspend(HandleFrio);
+	vTaskSuspend(HandleCalor);
+	
+	// Inicialização do timer
+	xTimerStart(auto_reload_timer, portMAX_DELAY);
+	
+	vTaskStartScheduler(); // Inicia o escalonador
+	
+	while(1)
+	{
+		// Nada é executado aqui, as funções das tarefas e de callback do timer estão abaixo
+	}
+}
+
+// Função de callback para o timer auto_reload_timer, é chamada a cada 1 s
+void TimerCallback(TimerHandle_t xTimer)
+{
+	set_bit(PORTD,led_sinal); // Liga o led_sinal para indicar que começou a leitura da temperatura
+	clr_bit(PORTB,buzina_porta); // A buzina que indica a abertura da porta fica desligada
+
+	// Faz a leitura da temperatura (simulada por um potenciômetro)
+	if(tst_bit(ADCSRA,ADIF)){ // Testa se a leitura foi feita		
+		leitura = ADC; // Atribui a leitura do ADC a variável leitura
+		temperatura = leitura /4; // Converte 1023 para 255
+	}
+	
+	if(temperatura > 180) // Entra nesse "if" se estiver calor
+	{
+		vTaskSuspend(HandleFrio); // Suspende a taskFrio
+		vTaskResume(HandleCalor); // Habilita a taskCalor
+		xEventGroupClearBits(evento,ev_temperatura); // Não está na temperatura correta para abrir a porta, então o bit desse evento fica zerado
+	}
+	
+	if(temperatura < 80) // Entra nesse "if" se estiver frio
+	{
+		vTaskSuspend(HandleCalor); // Suspende a taskCalor
+		vTaskResume(HandleFrio); // Habilita a taskFrio
+		xEventGroupClearBits(evento,ev_temperatura); // Não está na temperatura correta para abrir a porta, então o bit desse evento fica zerado
+	}
+	
+	if(temperatura >= 80 && temperatura <= 180) // Entra nesse "if" se não estiver nem frio nem calor (pode abrir a porta)
+	{
+		vTaskSuspend(HandleFrio); // Suspende a taskFrio
+		vTaskSuspend(HandleCalor); // Suspende a taskCalor
+		clr_bit(PORTB,lampada_calor); // Mantém desligada a lâmpada que esquenta
+		clr_bit(PORTB,ventilador); // Mantém desligado o ventilador que resfria
+		
+		set_bit(PORTD,led_habilita_buzina ); // Liga o LED que indica a temperatura correta para abrir a porta
+		
+		// Seta o bit que indica a ocorrência do evento da temperatura correta, mas para abrir a porta ainda precisa que o botão seja pressionado
+		xEventGroupSetBits(evento,ev_temperatura);
+		
+		if(!tst_bit(PIND,botao)) { // Entra nesse "if" se o botão for pressionado
+			while(!tst_bit(PIND,botao)); // Aguarda o botão ser solto
+			
+			// Seta o bit que indica a ocorrência do evento do botão pressionado, agora a porta será aberta
+			xEventGroupSetBits(evento,ev_botao);
+		}
+	}
+	
+	vTaskDelay(50/portTICK_PERIOD_MS); // Delay de 0,05 s para o led_sinal não piscar muito rápido
+	clr_bit(PORTD,led_sinal); // Desliga o led_sinal para indicar que terminou a leitura da temperatura
+}
+
+// A taskCalor desliga a lâmpada e liga o ventilador, resfriando o ambiente
+void taskCalor (void *p)
+{
+	while (1) // Loop infinito
+	{
+		clr_bit(PORTB,lampada_calor); // Desliga a lâmpada
+		set_bit(PORTB,ventilador); // Liga o ventilador
+		clr_bit(PORTD,led_habilita_buzina ); // Desliga o LED que indica a temperatura correta para abrir a porta
+	}
+}
+
+// A taskFrio liga a lâmpada e desliga o ventilador, esquentando o ambiente
+void taskFrio (void *p)
+{
+	while (1) // Loop infinito
+	{
+		set_bit(PORTB,lampada_calor); // Liga a lâmpada
+		clr_bit(PORTB,ventilador); // Desliga o ventilador
+		clr_bit(PORTD,led_habilita_buzina ); // Desliga o LED que indica a temperatura correta para abrir a porta
+	}
+}
+
+// A taskAbrirPorta aguarda pelos eventos que permitem abrir a porta (temperatura correta e botão pressionado), e se eles ocorrerem, abre a porta
+void taskAbrirPorta (void *p)
+{
+	uint8_t  ev_total = (ev_botao | ev_temperatura); // Cria um byte com acombinação dos 2 bytes de eventos (0b00000011 ou 0x03)
+	uint8_t  valor; // Cria a variável que recebe o valor dos eventos
+	
+	while (1) // Loop infinito
+	{
+		// Espera pela ocorrência do evento
+		valor = xEventGroupWaitBits(	evento,		// Grupo de evento
+										ev_total,   // Bits que são esperados
+										pdTRUE,		// Limpa os bits ao final
+										pdTRUE,		// Espera todos os bits serem setados
+										portMAX_DELAY);
+		
+		if (valor == ev_total) { // Se "valor" for igual aos bits esperados (0x03), então os 3 eventos ocorreram, permitindo abrir a porta
+			set_bit(PORTD,buzina_porta); // Liga a buzina que indica a abertura da porta
+			vTaskDelay(400/portTICK_PERIOD_MS); // Delay de 0,4 s
+			clr_bit(PORTD,buzina_porta); // Desliga a buzina que indica a abertura da porta
+		}
+		else { 
+			// Se o evento não ocorreu entra aqui
+		}
+	}
+}
