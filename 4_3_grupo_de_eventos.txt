@@ -1,0 +1,111 @@
+
+#define F_CPU 16000000UL // Define a frequência do microcontrolador 16MHz
+#include <avr/io.h>	// Definições de componente
+#include "FreeRTOS.h" // Biblioteca do FreeRTOS
+#include "task.h" // Biblioteca para utilizar tarefas
+#include "event_groups.h" // Biblioteca para utilizar grupos de eventos
+
+// Definições de macros
+#define set_bit(Y,bit_x)(Y|=(1<<bit_x)) // Coloca 1 no bit x da variável Y
+#define clr_bit(Y,bit_x)(Y&=~(1<<bit_x)) // Coloca 0 no bit x da variável Y
+#define tst_bit(Y,bit_x)(Y&(1<<bit_x)) // Testa o bit_x na variável Y (retorna 0 ou 1)
+#define cpl_bit(Y,bit_x) (Y^=(1<<bit_x)) // Troca o valor do bit
+
+// Definição dos nomes dos pinos
+#define LED_verde PB0
+#define LED_vermelho PB1
+#define BOTAO1 PD2
+#define BOTAO2 PD3
+#define BOTAO3 PD4
+
+// Criação do objeto do grupo de eventos
+EventGroupHandle_t evento; 
+
+// Bits dos eventos
+const uint8_t ev_1 = (1 << 0); // 0b00000001
+const uint8_t ev_2 = (1 << 1); // 0b00000010
+const uint8_t ev_3 = (1 << 2); // 0b00000100
+
+// Protótipos das funções das tarefas
+void acionamento (void *p);
+void controle (void *p); 
+
+int main(void)
+{
+	DDRB = 0b00000011; // Configura PB0 e PB1 como saídas
+	DDRD = 0b00000000; // Configura PD2, PD3 e PD4 como entradas
+	PORTB = 0b00000000; // Os LEDs começam apagados
+	PORTD = 0b00011100; // Habilita o pull-up para os botões
+	
+	// Criação do grupo de eventos
+	evento = xEventGroupCreate();
+
+	// Criação das tarefas
+	xTaskCreate(acionamento, "acionamento", 128, NULL, 1, NULL);
+	xTaskCreate(controle, "controle", 128, NULL, 1, NULL);
+		
+	vTaskStartScheduler(); // Inicia o escalonador
+	
+	while (1)
+	{
+		// Nada é executado aqui, as funções das tarefas estão abaixo
+	}
+}
+
+// A tarefa "acionamento" verifica se todos os eventos aconteceram para então acionar o LED verde ou vermelho
+void acionamento(void *p)
+{
+	uint8_t ev_T = (ev_1 | ev_2 | ev_3); // Cria um byte com a combinação dos 3 bytes de eventos (0b00000111 ou 0x07)
+	uint8_t valor; // Cria a variável que recebe o valor dos eventos
+	
+	while (1)
+	{
+		// Espera pela ocorrência do evento
+		valor = xEventGroupWaitBits(evento,		// Grupo de evento
+									ev_T,		// Bits que são esperados
+									pdTRUE,		// Limpa os bits ao final
+									pdTRUE,		// Espera todos os bits serem setados
+									3000/portTICK_PERIOD_MS); // Aguarda por 3 segundos
+		
+		if (valor == ev_T) { // Se "valor" for igual aos bits esperados (0x07), então o evento ocorreu, isso acontece caso os 3 botões sejam pressionados
+			clr_bit(PORTB,LED_vermelho); // Desliga o LED vermelho
+			// Pisca o LED verde e o deixa ligado
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			set_bit(PORTB,LED_verde);
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			clr_bit(PORTB,LED_verde);
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			set_bit(PORTB,LED_verde);
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			clr_bit(PORTB,LED_verde);
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			set_bit(PORTB,LED_verde);
+		}
+		else { // Se o evento não ocorreu entra aqui
+			set_bit(PORTB,LED_vermelho); // Acende o LED vermelho
+			clr_bit(PORTB,LED_verde); // Desliga o LED verde
+		}
+	}
+}
+
+// A tarefa "controle" lê os 3 botôes, onde cada um representa um evento
+void controle(void *p)
+{
+	while (1)
+	{
+		if(!tst_bit(PIND,BOTAO1)) { // Se o botão 1 for pressionado
+			while(!tst_bit(PIND,BOTAO1)); // Aguarda o botão 1 ser solto
+			xEventGroupSetBits(evento,ev_1); // Indica que o evento ev_1 ocorreu
+		}
+		
+		if(!tst_bit(PIND,BOTAO2)) { // Se o botão 2 for pressionado
+			while(!tst_bit(PIND,BOTAO2)); // Aguarda o botão 2 ser solto
+			xEventGroupSetBits(evento,ev_2); // Indica que o evento ev_2 ocorreu
+		}
+		
+		if(!tst_bit(PIND,BOTAO3)) { // Se o botão 3 for pressionado
+			while(!tst_bit(PIND,BOTAO3)); // Aguarda o botão 3 ser solto
+			xEventGroupSetBits(evento,ev_3); // Indica que o evento ev_3 ocorreu
+		}
+	}
+}
