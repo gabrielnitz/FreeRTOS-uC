@@ -1,0 +1,112 @@
+
+#define F_CPU 16000000UL // Define a frequência do microcontrolador 16MHz
+#include <avr/io.h>	// Definições de componente
+#include "FreeRTOS.h" // Biblioteca do FreeRTOS
+#include "timers.h" // Biblioteca para utilizar timers
+
+// Definições de macros
+#define set_bit(Y,bit_x)(Y|=(1<<bit_x)) // Coloca 1 no bit x da variável Y
+#define clr_bit(Y,bit_x)(Y&=~(1<<bit_x)) // Coloca 0 no bit x da variável Y
+#define tst_bit(Y,bit_x)(Y&(1<<bit_x)) // Testa o bit_x na variável Y (retorna 0 ou 1)
+#define cpl_bit(Y,bit_x) (Y^=(1<<bit_x)) // Troca o valor do bit
+
+// Definição dos nomes dos pinos
+#define LED_inicio PB3
+#define LED_verde PB0
+#define LED_amarelo PB1
+#define LED_vermelho PB2
+
+// Globais, identificadores dos timers
+static TimerHandle_t one_shot_timer = NULL;
+static TimerHandle_t auto_reload_timer1 = NULL;
+static TimerHandle_t auto_reload_timer2 = NULL;
+static TimerHandle_t auto_reload_timer3 = NULL;
+
+// Protótipos das funções de callback dos timers
+void TimerCallback1(TimerHandle_t xTimer1);
+void TimerCallback2(TimerHandle_t xTimer2);
+void TimerCallback3(TimerHandle_t xTimer3);
+
+int main(void)
+{
+	// Configurações
+	DDRB = 0b00001111; // Configura PB0, PB1, PB2 e PB3 como saída
+	
+	// Criação de timer one-shot
+	one_shot_timer = xTimerCreate(	"One-shot timer",           // Nome do timer
+									1000 / portTICK_PERIOD_MS,  // Período do timer (em ticks)
+									pdFALSE,                    // Auto-reload
+									(void *)0,                  // Timer ID
+									TimerCallback1);            // Função de callback
+									
+	// Criação de timer auto-reload
+	auto_reload_timer1 = xTimerCreate(	"Auto-reload timer 1",		// Nome do timer
+										3000 / portTICK_PERIOD_MS,	// Período do timer (em ticks)
+										pdTRUE,                     // Auto-reload
+										(void *)1,                  // Timer ID
+										TimerCallback1);			// Função de callback
+	
+	auto_reload_timer2 = xTimerCreate(	"Auto-reload timer 2",		// Nome do timer
+										3000 / portTICK_PERIOD_MS,	// Período do timer (em ticks)
+										pdTRUE,                     // Auto-reload
+										(void *)2,                  // Timer ID
+										TimerCallback2);			// Função de callback
+	
+	auto_reload_timer3 = xTimerCreate(	"Auto-reload timer 3",		// Nome do timer
+										3000 / portTICK_PERIOD_MS,	// Período do timer (em ticks)
+										pdTRUE,                     // Auto-reload
+										(void *)3,                  // Timer ID
+										TimerCallback3);			// Função de callback
+	
+	// Inicialização dos timers
+	xTimerStart(one_shot_timer, portMAX_DELAY);
+	xTimerStart(auto_reload_timer1, portMAX_DELAY);
+	xTimerStart(auto_reload_timer2, portMAX_DELAY);
+	xTimerStart(auto_reload_timer3, portMAX_DELAY);
+	
+	vTaskStartScheduler(); // Inicia o escalonador
+	
+	while(1)
+	{
+		// Nada é executado aqui, as funções de callback dos timers estão abaixo
+	}
+}
+
+// Função de callback para os timers one_shot_timer e auto_reload_timer1
+void TimerCallback1(TimerHandle_t xTimer1) 
+{
+	// Entra nesse if caso o timer de ID = 0 (one_shot_timer) seja acionado
+	if ((uint16_t)pvTimerGetTimerID(xTimer1) == 0) { 
+		set_bit(PORTB,LED_inicio); // Acende o LED_inicio
+		vTaskDelay(200/portTICK_PERIOD_MS); // Aguarda 0,2 s
+		clr_bit(PORTB,LED_inicio); // Desliga o LED_inicio
+	}
+	
+	// Entra nesse if caso o timer de ID = 1 (auto_reload_timer1) seja acionado
+	if ((uint16_t)pvTimerGetTimerID(xTimer1) == 1) {
+		set_bit(PORTB,LED_verde); // Acende o LED_verde
+		clr_bit(PORTB,LED_amarelo); // Desliga o LED_amarelo
+		clr_bit(PORTB,LED_vermelho); // Desliga o LED_vermelho
+	}
+	
+}
+
+// Função de callback para o timer auto_reload_timer2
+void TimerCallback2(TimerHandle_t xTimer2)
+{
+	vTaskDelay(1000/portTICK_PERIOD_MS); // Aguarda 1 s
+	clr_bit(PORTB,LED_verde); // Desliga o LED_verde
+	set_bit(PORTB,LED_amarelo); // Acende o LED_amarelo
+	clr_bit(PORTB,LED_vermelho); // Desliga o LED_vermelho
+}
+
+// Função de callback para o timer auto_reload_timer2
+void TimerCallback3(TimerHandle_t xTimer3)
+{
+	vTaskDelay(1000/portTICK_PERIOD_MS); // Aguarda 1 s
+	clr_bit(PORTB,LED_verde); // Desliga o LED_verde
+	clr_bit(PORTB,LED_amarelo); // Desliga o LED_amarelo
+	set_bit(PORTB,LED_vermelho); // Acende o LED_vermelho
+}
+
+
