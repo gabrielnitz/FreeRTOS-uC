@@ -1,0 +1,97 @@
+
+#define F_CPU 16000000UL // Define a frequência do microcontrolador 16MHz
+#include <avr/io.h>	// Definições de componente
+#include "FreeRTOS.h" // Biblioteca do FreeRTOS
+#include "task.h" // Biblioteca para utilizar tasks
+
+// Definições de macros
+#define set_bit(Y,bit_x)(Y|=(1<<bit_x)) // Coloca 1 no bit x da variável Y
+#define clr_bit(Y,bit_x)(Y&=~(1<<bit_x)) // Coloca 0 no bit x da variável Y
+#define tst_bit(Y,bit_x)(Y&(1<<bit_x)) // Testa o bit_x na variável Y (retorna 0 ou 1)
+#define cpl_bit(Y,bit_x) (Y^=(1<<bit_x)) // Troca o valor do bit
+
+// Definição dos nomes dos pinos
+#define LED1 PB3
+#define LED2 PD3
+#define LED3 PB0
+
+// Protótipos da funções das tarefas
+void task1 (void *p);
+void task2 (void *p);
+void task3 (void *p);
+
+// Identificadores das tarefas
+TaskHandle_t HandleTask1;
+TaskHandle_t HandleTask2;
+TaskHandle_t HandleTask3;
+
+int main(void)
+{
+	// Configuração do ADC (potenciômetro)
+	DIDR0 = 0x20; // Desabilita entrada digital do ADC5 (PC5)
+	ADMUX = 0x45; // Configura ADC5
+	ADCSRA = 0xE7; // Conversão contínua
+	ADCSRB = 0x00; // Conversão contínua
+	
+	// Configuração do PWM (LED1 e LED2)
+	DDRB = 0b00001001; // Configura PB0 e PB3 como saída
+	DDRD = 0b00001000; // Configura PD3 como saída
+	TCCR2A = 0b11100001; // Modo 1 para PWM fase corrigida, saida OC2A invertida e OC2B não invertida, OC2A e OC2B habilitados
+	TCCR2B = 0b00000001; // Liga TC2, prescaler = 1
+	OCR2A = 0; // Controle do ciclo ativo do PWM (0%) no pino OC2B => desliga o LED1
+	OCR2B = 0; // Controle do ciclo ativo do PWM (0%) no pino OC2A => desliga o LED2
+	
+	// Criação das tarefas
+	xTaskCreate(task1, "Tarefa 1", 128, (void*) 0, 1, &HandleTask1);
+	xTaskCreate(task2, "Tarefa 2", 128, (void*) 0, 1, &HandleTask2);
+	xTaskCreate(task3, "Tarefa 3", 128, (void*) 0, 2, &HandleTask3);
+
+	vTaskStartScheduler(); // Inicia o escalonador
+	
+	while(1)
+	{
+		// Nada é executado aqui, as tarefas estão nas funções abaixo
+	}
+}
+
+// Task 1 aciona o LED1 de maneira invertida conforme a posição do potenciômetro
+void task1 (void *p)
+{
+	while(1) // Loop infinito
+	{
+		if(tst_bit(ADCSRA,ADIF)){ // Testa se a leitura foi feita
+			unsigned short int valor_1;
+			unsigned short int i;
+			valor_1 = ADC; // Atribui a leitura do ADC a valor_1
+			i = valor_1/4; // Converte 1023 para 255
+			OCR2A = i; // Controla o LED1
+		}
+	}
+}
+
+// Task 2 aciona o LED2 de maneira não invertida conforme a posição do potenciômetro
+void task2 (void *p)
+{
+	while(1) // Loop infinito
+	{
+		if(tst_bit(ADCSRA,ADIF)){ // Testa se a leitura foi feita
+			unsigned short int valor_2;
+			unsigned short int j;
+			valor_2 = ADC; // Atribui a leitura do ADC a valor_2
+			j = valor_2/4; // Converte 1023 para 255
+			OCR2B = j; // Controla o LED2
+		}
+	}
+}
+
+// Task 3 pisca o LED3 com uma frequência de 1 Hz
+void task3 (void *p)
+{
+	while(1) // Loop infinito
+	{
+		set_bit(PORTB,LED3); // Acende o LED3
+		vTaskDelay(500/portTICK_PERIOD_MS); // Aguarda 0,5 s
+		clr_bit(PORTB,LED3); // Desliga o LED3
+		vTaskDelay(500/portTICK_PERIOD_MS); // Aguarda 0,5 s
+	}
+}
