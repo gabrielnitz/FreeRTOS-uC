@@ -100,7 +100,7 @@ void TimerCallback2(TimerHandle_t xTimer2)
 	clr_bit(PORTB,LED_vermelho); // Desliga o LED_vermelho
 }
 
-// Função de callback para o timer auto_reload_timer2
+// Função de callback para o timer auto_reload_timer3
 void TimerCallback3(TimerHandle_t xTimer3)
 {
 	vTaskDelay(1000/portTICK_PERIOD_MS); // Aguarda 1 s
