@@ -181,7 +181,7 @@ void taskAbrirPorta (void *p)
 										pdTRUE,		// Espera todos os bits serem setados
 										portMAX_DELAY);
 		
-		if (valor == ev_total) { // Se "valor" for igual aos bits esperados (0x03), então os 3 eventos ocorreram, permitindo abrir a porta
+		if (valor == ev_total) { // Se "valor" for igual aos bits esperados (0x03), então os 2 eventos ocorreram, permitindo abrir a porta
 			set_bit(PORTD,buzina_porta); // Liga a buzina que indica a abertura da porta
 			vTaskDelay(400/portTICK_PERIOD_MS); // Delay de 0,4 s
 			clr_bit(PORTD,buzina_porta); // Desliga a buzina que indica a abertura da porta
